@@ -1,0 +1,72 @@
+name: Repro (Nix Devshell)
+
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: "Number of startup cycles"
+        required: false
+        default: "50"
+      start_timeout_seconds:
+        description: "Startup timeout seconds"
+        required: false
+        default: "10"
+      ready_grace_seconds:
+        description: "Seconds to keep process alive after READY"
+        required: false
+        default: "1"
+  push:
+    branches:
+      - main
+
+jobs:
+  repro:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: darwin-aarch64
+          - os: ubuntu-24.04
+            target: linux-x86_64
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+
+    env:
+      RUNS: ${{ github.event.inputs.runs || '50' }}
+      START_TIMEOUT_SECONDS: ${{ github.event.inputs.start_timeout_seconds || '10' }}
+      READY_GRACE_SECONDS: ${{ github.event.inputs.ready_grace_seconds || '1' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v18
+
+      - name: Show host and Nix info
+        run: |
+          uname -a
+          nix --version
+          nix flake show --no-write-lock-file
+
+      - name: Run repro in Nix devshell
+        run: |
+          chmod +x ./repro.sh
+          nix develop --accept-flake-config --command env \
+            RUNS="$RUNS" \
+            START_TIMEOUT_SECONDS="$START_TIMEOUT_SECONDS" \
+            READY_GRACE_SECONDS="$READY_GRACE_SECONDS" \
+            ./repro.sh
+
+      - name: Upload repro logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repro-logs-${{ matrix.target }}
+          path: |
+            run-*.log
+            db/LOG
+            db/LOG.old.*
+          if-no-files-found: warn
